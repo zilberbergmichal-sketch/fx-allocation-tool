@@ -29,6 +29,7 @@ def pct(x):
     return f"{x * 100:.1f}%"
 
 def calculate_portfolio(equity_weight, ig_weight, hy_weight, gov_dist):
+    # Government bonds are ALWAYS the residual asset class.
     gov_weight = 1.0 - equity_weight - ig_weight - hy_weight
 
     result = data.copy()
@@ -79,8 +80,8 @@ def get_preset(name):
 
 st.title("FX Allocation Tool")
 st.caption(
-    "Fixed Equity / IG / HY currency exposures + adjustable government-bond allocation "
-    "= total portfolio FX allocation."
+    "Change the equity weight and government-bond currency mix, "
+    "and see the resulting total portfolio FX allocation."
 )
 
 # ------------------------------------------------------------
@@ -89,25 +90,27 @@ st.caption(
 
 st.sidebar.header("Portfolio assumptions")
 
-equity_weight = st.sidebar.slider(
-    "Equity weight",
-    min_value=0.25,
-    max_value=0.30,
-    value=0.25,
-    step=0.005,
-    format="%.1f%%",
+# Use whole percentage points in the UI so the slider is intuitive.
+equity_pct = st.sidebar.slider(
+    "Equity weight (%)",
+    min_value=25,
+    max_value=30,
+    value=25,
+    step=1,
 )
 
-# Streamlit's slider format works on raw values, so show exact percentage below.
-st.sidebar.caption(f"Selected Equity weight: **{pct(equity_weight)}**")
+equity_weight = equity_pct / 100.0
 
 ig_weight = 0.09
 hy_weight = 0.01
+
+# IMPORTANT: Government bonds are the residual.
 gov_weight = 1.0 - equity_weight - ig_weight - hy_weight
 
+st.sidebar.metric("Equity", pct(equity_weight))
 st.sidebar.metric("IG", pct(ig_weight))
 st.sidebar.metric("HY", pct(hy_weight))
-st.sidebar.metric("Government bonds", pct(gov_weight))
+st.sidebar.metric("Government bonds (residual)", pct(gov_weight))
 
 st.sidebar.divider()
 
@@ -132,10 +135,41 @@ balancing_currency = st.sidebar.selectbox(
 )
 
 # ------------------------------------------------------------
+# PORTFOLIO STRUCTURE — CLEAR TOP-LINE IDENTITY
+# ------------------------------------------------------------
+
+st.subheader("Portfolio structure")
+
+c1, c2, c3, c4, c5 = st.columns([1.15, 0.22, 1.0, 0.22, 1.55])
+
+with c1:
+    st.metric("Equity", pct(equity_weight))
+with c2:
+    st.markdown("## +")
+with c3:
+    st.metric("IG + HY", pct(ig_weight + hy_weight))
+with c4:
+    st.markdown("## +")
+with c5:
+    st.metric("Government bonds = residual", pct(gov_weight))
+
+st.markdown(
+    f"""
+    **{pct(equity_weight)} Equity + {pct(ig_weight)} IG + {pct(hy_weight)} HY
+    + {pct(gov_weight)} Government Bonds = 100.0%**
+    """
+)
+
+st.info(
+    "When Equity rises, Government Bonds fall one-for-one. "
+    "IG and HY remain fixed at 9% and 1%."
+)
+
+# ------------------------------------------------------------
 # GOVERNMENT-BOND TILTS
 # ------------------------------------------------------------
 
-st.subheader("Government-bond allocation")
+st.subheader("Government-bond currency allocation")
 
 col_info, col_controls = st.columns([1.15, 1.85], gap="large")
 
@@ -158,10 +192,9 @@ tilts = {}
 with col_controls:
     control_cols = st.columns(3)
 
-    for i, currency in enumerate(CURRENCIES):
-        if currency == balancing_currency:
-            continue
+    non_balancing = [c for c in CURRENCIES if c != balancing_currency]
 
+    for i, currency in enumerate(non_balancing):
         default_value = base_tilts.get(currency, 0.0) * 100
 
         with control_cols[i % 3]:
@@ -184,6 +217,7 @@ tilts[balancing_currency] = -sum(
 )
 
 cofer = data.set_index("Currency")["COFER_Gov_Dist"]
+
 adjusted_gov = pd.Series(
     {
         c: cofer.loc[c] + tilts[c]
@@ -218,26 +252,16 @@ st.info(
 # CALCULATE
 # ------------------------------------------------------------
 
-result, gov_weight = calculate_portfolio(
+result, gov_weight_check = calculate_portfolio(
     equity_weight,
     ig_weight,
     hy_weight,
     adjusted_gov.reindex(CURRENCIES).values,
 )
 
-# ------------------------------------------------------------
-# TOP METRICS
-# ------------------------------------------------------------
-
-m1, m2, m3, m4 = st.columns(4)
-
-m1.metric("Equity", pct(equity_weight))
-m2.metric("IG + HY", pct(ig_weight + hy_weight))
-m3.metric("Government bonds", pct(gov_weight))
-m4.metric(
-    "FX allocation total",
-    pct(result["Total_FX_Allocation"].sum()),
-)
+# Internal consistency check.
+if not np.isclose(gov_weight, gov_weight_check):
+    st.error("Internal weight calculation mismatch.")
 
 # ------------------------------------------------------------
 # GOVERNMENT-BOND TABLE
@@ -251,12 +275,13 @@ gov_table = result[
     ]
 ].copy()
 
-gov_table["Tilt_pp"] = gov_table.apply(
-    lambda r: (
-        r["Gov_Dist_Adjusted"]
-        - r["COFER_Gov_Dist"]
-    ) * 100,
-    axis=1,
+gov_table["Tilt_pp"] = (
+    gov_table["Gov_Dist_Adjusted"]
+    - gov_table["COFER_Gov_Dist"]
+) * 100
+
+gov_table["Gov_Portfolio_Contribution"] = (
+    gov_weight * gov_table["Gov_Dist_Adjusted"]
 )
 
 gov_display = gov_table.rename(
@@ -264,11 +289,15 @@ gov_display = gov_table.rename(
         "COFER_Gov_Dist": "COFER Gov.",
         "Gov_Dist_Adjusted": "Adjusted Gov.",
         "Tilt_pp": "Tilt (pp)",
+        "Gov_Portfolio_Contribution": "Contribution to Portfolio",
     }
 )
 
 gov_display["COFER Gov."] = gov_display["COFER Gov."].map(pct)
 gov_display["Adjusted Gov."] = gov_display["Adjusted Gov."].map(pct)
+gov_display["Contribution to Portfolio"] = gov_display[
+    "Contribution to Portfolio"
+].map(pct)
 gov_display["Tilt (pp)"] = gov_display["Tilt (pp)"].map(
     lambda x: f"{x:+.1f}"
 )
@@ -365,7 +394,7 @@ detail = result[
 detail.columns = [
     "Currency",
     "Current Benchmark",
-    "Fixed Components",
+    "Equity + IG + HY",
     "Government Bonds",
     "New Portfolio",
     "Difference",
@@ -373,7 +402,7 @@ detail.columns = [
 
 for col in [
     "Current Benchmark",
-    "Fixed Components",
+    "Equity + IG + HY",
     "Government Bonds",
     "New Portfolio",
 ]:
