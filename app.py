@@ -17,18 +17,35 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Force sliders to run left-to-right even when the page/browser is RTL:
-       minimum and starting point on the LEFT, maximum on the RIGHT. */
-    div[data-testid="stSlider"],
-    div[data-testid="stSlider"] > div,
-    div[data-testid="stSlider"] [data-baseweb="slider"],
-    div[data-testid="stSlider"] [role="slider"] {
+    /* Force the Streamlit sidebar controls to LTR.
+       This ensures slider minimum is physically on the LEFT
+       and maximum is physically on the RIGHT, even in an RTL browser/page. */
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] > div,
+    section[data-testid="stSidebar"] [data-testid="stSlider"],
+    section[data-testid="stSidebar"] [data-testid="stSlider"] *,
+    section[data-testid="stSidebar"] [data-baseweb="slider"],
+    section[data-testid="stSidebar"] [data-baseweb="slider"] * {
         direction: ltr !important;
+        unicode-bidi: isolate !important;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stSlider"] {
         text-align: left !important;
     }
 
-    /* BaseWeb sometimes mirrors the slider using CSS in RTL contexts. */
-    div[data-testid="stSlider"] [data-baseweb="slider"] {
+    /* Prevent RTL flex mirroring inside BaseWeb slider internals. */
+    section[data-testid="stSidebar"] [data-baseweb="slider"],
+    section[data-testid="stSidebar"] [data-baseweb="slider"] > div {
+        flex-direction: row !important;
+        transform: none !important;
+    }
+
+    /* Keep slider value labels readable left-to-right. */
+    section[data-testid="stSidebar"] [role="slider"],
+    section[data-testid="stSidebar"] [role="slider"] * {
+        direction: ltr !important;
+        unicode-bidi: isolate !important;
         transform: none !important;
     }
     </style>
