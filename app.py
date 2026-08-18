@@ -17,22 +17,19 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Keep numeric sliders left-to-right: minimum on left, maximum on right */
-    div[data-testid="stSlider"] {
+    /* Force sliders to run left-to-right even when the page/browser is RTL:
+       minimum and starting point on the LEFT, maximum on the RIGHT. */
+    div[data-testid="stSlider"],
+    div[data-testid="stSlider"] > div,
+    div[data-testid="stSlider"] [data-baseweb="slider"],
+    div[data-testid="stSlider"] [role="slider"] {
         direction: ltr !important;
         text-align: left !important;
     }
 
-    div[data-testid="stSlider"] > div {
-        direction: ltr !important;
-    }
-
+    /* BaseWeb sometimes mirrors the slider using CSS in RTL contexts. */
     div[data-testid="stSlider"] [data-baseweb="slider"] {
-        direction: ltr !important;
-    }
-
-    div[data-testid="stSlider"] [data-baseweb="slider"] > div {
-        direction: ltr !important;
+        transform: none !important;
     }
     </style>
     """,
@@ -118,9 +115,9 @@ equity_pct = st.sidebar.slider(
 
 ig_pct = st.sidebar.slider(
     "IG weight (%)",
-    min_value=10,
+    min_value=9,
     max_value=15,
-    value=10,
+    value=9,
     step=1,
 )
 
@@ -206,7 +203,7 @@ with st.expander("Show allocation assumptions"):
 
     st.caption(
         "The currency distributions within Equity, IG and HY are fixed assumptions. "
-        "Total Equity can vary from 25% to 30%, IG from 10% to 15%, and HY from 1% to 5%. "
+        "Total Equity can vary from 25% to 30%, IG from 9% to 15%, and HY from 1% to 5%. "
         "Government Bonds are always the residual required to bring the total portfolio to 100%. "
         "The Government Bond currency distribution starts from COFER and can be changed using the tilts below."
     )
