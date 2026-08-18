@@ -122,7 +122,8 @@ st.caption(
 st.sidebar.header("Portfolio assumptions")
 
 # Asset-class weights are selectable; Government Bonds are always the residual.
-equity_pct = st.sidebar.slider(
+# Use number inputs rather than sliders so RTL/LTR browser settings cannot reverse the scale.
+equity_pct = st.sidebar.number_input(
     "Equity weight (%)",
     min_value=25,
     max_value=30,
@@ -130,7 +131,7 @@ equity_pct = st.sidebar.slider(
     step=1,
 )
 
-ig_pct = st.sidebar.slider(
+ig_pct = st.sidebar.number_input(
     "IG weight (%)",
     min_value=9,
     max_value=15,
@@ -138,7 +139,7 @@ ig_pct = st.sidebar.slider(
     step=1,
 )
 
-hy_pct = st.sidebar.slider(
+hy_pct = st.sidebar.number_input(
     "HY weight (%)",
     min_value=1,
     max_value=5,
