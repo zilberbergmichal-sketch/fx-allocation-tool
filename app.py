@@ -330,6 +330,26 @@ if not np.isclose(gov_weight, gov_weight_check):
 # GOVERNMENT-BOND TABLE
 # ------------------------------------------------------------
 
+# Derive the CURRENT government-bond currency distribution from the current
+# total FX benchmark, after subtracting the fixed 25% Equity + 9% IG + 1% HY
+# currency contribution. The residual 65% is the current Government sleeve.
+BASE_EQUITY_WEIGHT = 0.25
+BASE_IG_WEIGHT = 0.09
+BASE_HY_WEIGHT = 0.01
+BASE_GOV_WEIGHT = 1.0 - BASE_EQUITY_WEIGHT - BASE_IG_WEIGHT - BASE_HY_WEIGHT
+
+current_fixed_contribution = (
+    BASE_EQUITY_WEIGHT * data["Equity_Dist"]
+    + BASE_IG_WEIGHT * data["IG_Dist"]
+    + BASE_HY_WEIGHT * data["HY_Dist"]
+)
+
+current_gov_contribution = (
+    data["Current_FX_Benchmark"] - current_fixed_contribution
+)
+
+current_gov_dist_implied = current_gov_contribution / BASE_GOV_WEIGHT
+
 gov_table = result[
     [
         "Currency",
@@ -337,6 +357,8 @@ gov_table = result[
         "Gov_Dist_Adjusted",
     ]
 ].copy()
+
+gov_table["Current_Gov_Dist_Implied"] = current_gov_dist_implied.values
 
 gov_table["Tilt_pp"] = (
     gov_table["Gov_Dist_Adjusted"]
@@ -347,8 +369,18 @@ gov_table["Gov_Portfolio_Contribution"] = (
     gov_weight * gov_table["Gov_Dist_Adjusted"]
 )
 
-gov_display = gov_table.rename(
+gov_display = gov_table[
+    [
+        "Currency",
+        "Current_Gov_Dist_Implied",
+        "COFER_Gov_Dist",
+        "Gov_Dist_Adjusted",
+        "Tilt_pp",
+        "Gov_Portfolio_Contribution",
+    ]
+].rename(
     columns={
+        "Current_Gov_Dist_Implied": "Current Gov. Mix (implied)",
         "COFER_Gov_Dist": "COFER Gov.",
         "Gov_Dist_Adjusted": "Adjusted Gov.",
         "Tilt_pp": "Tilt (pp)",
@@ -356,19 +388,139 @@ gov_display = gov_table.rename(
     }
 )
 
-gov_display["COFER Gov."] = gov_display["COFER Gov."].map(pct)
-gov_display["Adjusted Gov."] = gov_display["Adjusted Gov."].map(pct)
-gov_display["Contribution to Portfolio"] = gov_display[
-    "Contribution to Portfolio"
-].map(pct)
+for col in [
+    "Current Gov. Mix (implied)",
+    "COFER Gov.",
+    "Adjusted Gov.",
+    "Contribution to Portfolio",
+]:
+    gov_display[col] = gov_display[col].map(pct)
+
 gov_display["Tilt (pp)"] = gov_display["Tilt (pp)"].map(
     lambda x: f"{x:+.1f}"
 )
+
+st.subheader("Government-bond currency mix")
 
 st.dataframe(
     gov_display,
     use_container_width=True,
     hide_index=True,
+)
+
+st.caption(
+    "Current Gov. Mix (implied) is derived from the current currency benchmark "
+    "after subtracting the fixed currency contribution of 25% Equity, 9% IG and "
+    "1% HY, and normalizing the remaining 65% Government Bonds sleeve to 100%."
+)
+
+# ------------------------------------------------------------
+# DETAIL TABLE
+# ------------------------------------------------------------
+
+st.subheader("Portfolio detail")
+
+detail = result[
+    [
+        "Currency",
+        "Current_FX_Benchmark",
+        "Fixed_Contribution",
+        "Gov_Contribution",
+        "Total_FX_Allocation",
+        "Vs_Benchmark",
+    ]
+].copy()
+
+detail.columns = [
+    "Currency",
+    "Current Benchmark",
+    "Equity + IG + HY",
+    "Government Bonds",
+    "New Portfolio",
+    "Difference",
+]
+
+for col in [
+    "Current Benchmark",
+    "Equity + IG + HY",
+    "Government Bonds",
+    "New Portfolio",
+]:
+    detail[col] = detail[col].map(pct)
+
+detail["Difference"] = (
+    result["Vs_Benchmark"] * 100
+).map(lambda x: f"{x:+.1f} pp")
+
+st.dataframe(
+    detail,
+    use_container_width=True,
+    hide_index=True,
+)
+
+# ------------------------------------------------------------
+# CURRENCY MIX COMPARISON TABLE
+# ------------------------------------------------------------
+
+st.subheader("Currency mix comparison")
+
+# Current benchmark = current total FX benchmark.
+# Recommended Equity + Corporate Bonds = Equity + IG + HY, normalized to 100%.
+# Recommended Government Bonds = adjusted government-bond currency mix, normalized to 100%.
+# Recommended Total = resulting total portfolio FX allocation.
+
+risk_sleeve_total = equity_weight + ig_weight + hy_weight
+
+mix_comparison = result[
+    [
+        "Currency",
+        "Current_FX_Benchmark",
+        "Fixed_Contribution",
+        "Gov_Dist_Adjusted",
+        "Total_FX_Allocation",
+    ]
+].copy()
+
+mix_comparison["Recommended Equity + Corporate Bonds"] = (
+    mix_comparison["Fixed_Contribution"] / risk_sleeve_total
+)
+
+mix_comparison = mix_comparison.rename(
+    columns={
+        "Current_FX_Benchmark": "Current Currency Benchmark",
+        "Gov_Dist_Adjusted": "Recommended Government Bond Mix",
+        "Total_FX_Allocation": "Recommended Currency Benchmark",
+    }
+)
+
+mix_comparison = mix_comparison[
+    [
+        "Currency",
+        "Current Currency Benchmark",
+        "Recommended Equity + Corporate Bonds",
+        "Recommended Government Bond Mix",
+        "Recommended Currency Benchmark",
+    ]
+]
+
+for col in [
+    "Current Currency Benchmark",
+    "Recommended Equity + Corporate Bonds",
+    "Recommended Government Bond Mix",
+    "Recommended Currency Benchmark",
+]:
+    mix_comparison[col] = mix_comparison[col].map(pct)
+
+st.dataframe(
+    mix_comparison,
+    use_container_width=True,
+    hide_index=True,
+)
+
+st.caption(
+    "The Equity + Corporate Bonds and Government Bonds columns each show "
+    "the currency composition within that sleeve, normalized to 100%. "
+    "The final column shows the resulting total portfolio currency allocation."
 )
 
 # ------------------------------------------------------------
@@ -435,117 +587,6 @@ delta_fig.update_layout(
 st.plotly_chart(
     delta_fig,
     use_container_width=True,
-)
-
-# ------------------------------------------------------------
-# DETAIL TABLE
-# ------------------------------------------------------------
-
-st.subheader("Portfolio detail")
-
-detail = result[
-    [
-        "Currency",
-        "Current_FX_Benchmark",
-        "Fixed_Contribution",
-        "Gov_Contribution",
-        "Total_FX_Allocation",
-        "Vs_Benchmark",
-    ]
-].copy()
-
-detail.columns = [
-    "Currency",
-    "Current Benchmark",
-    "Equity + IG + HY",
-    "Government Bonds",
-    "New Portfolio",
-    "Difference",
-]
-
-for col in [
-    "Current Benchmark",
-    "Equity + IG + HY",
-    "Government Bonds",
-    "New Portfolio",
-]:
-    detail[col] = detail[col].map(pct)
-
-detail["Difference"] = (
-    result["Vs_Benchmark"] * 100
-).map(lambda x: f"{x:+.1f} pp")
-
-st.dataframe(
-    detail,
-    use_container_width=True,
-    hide_index=True,
-)
-
-
-# ------------------------------------------------------------
-# CURRENCY MIX COMPARISON TABLE
-# ------------------------------------------------------------
-
-st.subheader("Currency mix comparison")
-
-# Current benchmark = current total FX benchmark.
-# Recommended Equity + Corporate Bonds = Equity + IG + HY, normalized to 100%.
-# Recommended Government Bonds = adjusted government-bond currency mix, normalized to 100%.
-# Recommended Total = resulting total portfolio FX allocation.
-
-risk_sleeve_total = equity_weight + ig_weight + hy_weight
-
-mix_comparison = result[
-    [
-        "Currency",
-        "Current_FX_Benchmark",
-        "Fixed_Contribution",
-        "Gov_Dist_Adjusted",
-        "Total_FX_Allocation",
-    ]
-].copy()
-
-mix_comparison["Recommended Equity + Corporate Bonds"] = (
-    mix_comparison["Fixed_Contribution"] / risk_sleeve_total
-)
-
-mix_comparison = mix_comparison.rename(
-    columns={
-        "Currency": "Currency",
-        "Current_FX_Benchmark": "Current Currency Benchmark",
-        "Gov_Dist_Adjusted": "Recommended Government Bond Mix",
-        "Total_FX_Allocation": "Recommended Currency Benchmark",
-    }
-)
-
-mix_comparison = mix_comparison[
-    [
-        "Currency",
-        "Current Currency Benchmark",
-        "Recommended Equity + Corporate Bonds",
-        "Recommended Government Bond Mix",
-        "Recommended Currency Benchmark",
-    ]
-]
-
-for col in [
-    "Current Currency Benchmark",
-    "Recommended Equity + Corporate Bonds",
-    "Recommended Government Bond Mix",
-    "Recommended Currency Benchmark",
-]:
-    mix_comparison[col] = mix_comparison[col].map(pct)
-
-st.dataframe(
-    mix_comparison,
-    use_container_width=True,
-    hide_index=True,
-)
-
-st.caption(
-    "The Equity + Corporate Bonds and Government Bonds columns each show "
-    "the currency composition within that sleeve, normalized to 100%. "
-    "The final column shows the resulting total portfolio currency allocation."
 )
 
 # ------------------------------------------------------------
