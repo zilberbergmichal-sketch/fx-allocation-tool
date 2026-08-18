@@ -568,35 +568,151 @@ st.plotly_chart(
 )
 
 # ------------------------------------------------------------
-# CHANGE VS BENCHMARK
+# CHANGE DECOMPOSITION VS BENCHMARK
 # ------------------------------------------------------------
 
-st.subheader("Change vs current FX benchmark")
+st.subheader("Change vs current FX benchmark — decomposition")
 
-delta_fig = go.Figure()
+# Stage 0: Current total FX benchmark.
+current_total = data["Current_FX_Benchmark"].astype(float)
 
-delta_fig.add_bar(
-    x=result["Currency"],
-    y=result["Vs_Benchmark"] * 100,
-    name="Change",
+# Stage 1: Keep the base strategic mix (25% Equity / 9% IG / 1% HY / 65% Gov)
+# and replace the implied current government-bond mix with COFER.
+base_fixed_contribution = (
+    BASE_EQUITY_WEIGHT * data["Equity_Dist"]
+    + BASE_IG_WEIGHT * data["IG_Dist"]
+    + BASE_HY_WEIGHT * data["HY_Dist"]
 )
 
-delta_fig.add_hline(
+cofer_stage = (
+    base_fixed_contribution
+    + BASE_GOV_WEIGHT * data["COFER_Gov_Dist"]
+)
+
+# Stage 2: Apply the selected currency tilts to COFER, still using the base 25/9/1 mix.
+tilt_stage = (
+    base_fixed_contribution
+    + BASE_GOV_WEIGHT * result["Gov_Dist_Adjusted"]
+)
+
+# Stage 3: Apply the selected Equity / IG / HY weights.
+final_stage = result["Total_FX_Allocation"].astype(float)
+
+decomp = pd.DataFrame(
+    {
+        "Currency": result["Currency"],
+        "COFER effect": (cofer_stage - current_total) * 100.0,
+        "Tilt effect": (tilt_stage - cofer_stage) * 100.0,
+        "Asset-mix effect": (final_stage - tilt_stage) * 100.0,
+        "Total change": (final_stage - current_total) * 100.0,
+    }
+)
+
+# Numerical reconciliation check.
+decomp["Reconstructed change"] = (
+    decomp["COFER effect"]
+    + decomp["Tilt effect"]
+    + decomp["Asset-mix effect"]
+)
+
+if not np.allclose(
+    decomp["Reconstructed change"],
+    decomp["Total change"],
+    atol=1e-9,
+):
+    st.error("Internal decomposition mismatch.")
+
+decomp_fig = go.Figure()
+
+for component in [
+    "COFER effect",
+    "Tilt effect",
+    "Asset-mix effect",
+]:
+    decomp_fig.add_bar(
+        x=decomp["Currency"],
+        y=decomp[component],
+        name=component,
+        customdata=decomp[["Total change"]].to_numpy(),
+        hovertemplate=(
+            "%{x}"
+            f"<br>{component}: %{{y:+.2f}} pp"
+            "<br>Total change: %{customdata[0]:+.2f} pp"
+            "<extra></extra>"
+        ),
+    )
+
+# Add a marker for the final total change so the stacked pieces can be
+# visually reconciled with the overall move.
+decomp_fig.add_trace(
+    go.Scatter(
+        x=decomp["Currency"],
+        y=decomp["Total change"],
+        mode="markers",
+        name="Total change",
+        marker=dict(
+            symbol="diamond",
+            size=10,
+            color="black",
+        ),
+        hovertemplate=(
+            "%{x}<br>Total change: %{y:+.2f} pp<extra></extra>"
+        ),
+    )
+)
+
+decomp_fig.add_hline(
     y=0,
     line_width=1,
 )
 
-delta_fig.update_layout(
-    yaxis_title="Difference (percentage points)",
+decomp_fig.update_layout(
+    barmode="relative",
+    yaxis_title="Contribution to change (percentage points)",
     xaxis_title="Currency",
-    showlegend=False,
-    height=350,
+    legend_title="",
+    height=430,
     margin=dict(l=30, r=20, t=20, b=30),
 )
 
 st.plotly_chart(
-    delta_fig,
+    decomp_fig,
     use_container_width=True,
+)
+
+st.caption(
+    "COFER effect: move from the current implied government-bond mix to COFER "
+    "using the fixed 25% Equity / 9% IG / 1% HY benchmark mix. "
+    "Tilt effect: additional impact of the selected government-bond currency tilts. "
+    "Asset-mix effect: additional impact of changing Equity / IG / HY weights from 25% / 9% / 1%. "
+    "At the default 25% / 9% / 1%, the Asset-mix effect is zero."
+)
+
+# Decomposition table for exact values.
+decomp_display = decomp[
+    [
+        "Currency",
+        "COFER effect",
+        "Tilt effect",
+        "Asset-mix effect",
+        "Total change",
+    ]
+].copy()
+
+for col in [
+    "COFER effect",
+    "Tilt effect",
+    "Asset-mix effect",
+    "Total change",
+]:
+    decomp_display[col] = decomp_display[col].map(
+        lambda x: f"{x:+.2f} pp"
+    )
+
+st.dataframe(
+    decomp_display,
+    use_container_width=True,
+    hide_index=True,
 )
 
 # ------------------------------------------------------------
