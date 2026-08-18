@@ -90,19 +90,6 @@ def calculate_portfolio(equity_weight, ig_weight, hy_weight, gov_dist):
     return result, gov_weight
 
 
-def get_preset(name):
-    tilts = {c: 0.0 for c in CURRENCIES}
-
-    if name == "USD +5pp / EUR -5pp":
-        tilts["USD"] = 0.05
-        tilts["EUR"] = -0.05
-
-    elif name == "USD +3pp / AUD -3pp":
-        tilts["USD"] = 0.03
-        tilts["AUD"] = -0.03
-
-    return tilts
-
 
 # ------------------------------------------------------------
 # TITLE
@@ -120,7 +107,7 @@ st.caption(
 
 st.sidebar.header("Portfolio assumptions")
 
-# Use whole percentage points in the UI so the slider is intuitive.
+# Asset-class weights are selectable; Government Bonds are always the residual.
 equity_pct = st.sidebar.slider(
     "Equity weight (%)",
     min_value=25,
@@ -129,12 +116,27 @@ equity_pct = st.sidebar.slider(
     step=1,
 )
 
+ig_pct = st.sidebar.slider(
+    "IG weight (%)",
+    min_value=10,
+    max_value=15,
+    value=10,
+    step=1,
+)
+
+hy_pct = st.sidebar.slider(
+    "HY weight (%)",
+    min_value=1,
+    max_value=5,
+    value=1,
+    step=1,
+)
+
 equity_weight = equity_pct / 100.0
+ig_weight = ig_pct / 100.0
+hy_weight = hy_pct / 100.0
 
-ig_weight = 0.09
-hy_weight = 0.01
-
-# IMPORTANT: Government bonds are the residual.
+# IMPORTANT: Government bonds are always the residual.
 gov_weight = 1.0 - equity_weight - ig_weight - hy_weight
 
 st.sidebar.metric("Equity", pct(equity_weight))
@@ -143,26 +145,7 @@ st.sidebar.metric("HY", pct(hy_weight))
 st.sidebar.metric("Government bonds (residual)", pct(gov_weight))
 
 st.sidebar.divider()
-
-preset = st.sidebar.selectbox(
-    "Government-bond preset",
-    [
-        "COFER",
-        "USD +5pp / EUR -5pp",
-        "USD +3pp / AUD -3pp",
-        "Custom",
-    ],
-)
-
-balancing_currency = st.sidebar.selectbox(
-    "Balancing currency",
-    CURRENCIES,
-    index=CURRENCIES.index("EUR"),
-    help=(
-        "The tilt of this currency is calculated automatically so that "
-        "all government-bond tilts sum to zero."
-    ),
-)
+st.sidebar.caption("Government-bond base allocation: COFER")
 
 # ------------------------------------------------------------
 # PORTFOLIO STRUCTURE — CLEAR TOP-LINE IDENTITY
@@ -191,8 +174,8 @@ st.markdown(
 )
 
 st.info(
-    "When Equity rises, Government Bonds fall one-for-one. "
-    "IG and HY remain fixed at 9% and 1%."
+    "Equity, IG and HY can be changed within the selected ranges. "
+    "Government Bonds automatically equal the residual needed to reach 100%."
 )
 
 # ------------------------------------------------------------
@@ -222,10 +205,10 @@ with st.expander("Show allocation assumptions"):
     )
 
     st.caption(
-        "Equity, IG and HY currency distributions are fixed assumptions. "
-        "The Equity total weight can vary from 25% to 30%, with Government Bonds "
-        "adjusting one-for-one as the residual. The Government Bond currency "
-        "distribution starts from COFER and can be changed using the tilts below."
+        "The currency distributions within Equity, IG and HY are fixed assumptions. "
+        "Total Equity can vary from 25% to 30%, IG from 10% to 15%, and HY from 1% to 5%. "
+        "Government Bonds are always the residual required to bring the total portfolio to 100%. "
+        "The Government Bond currency distribution starts from COFER and can be changed using the tilts below."
     )
 
 # ------------------------------------------------------------
@@ -241,43 +224,32 @@ with col_info:
         """
         **Base allocation:** COFER government-bond distribution.
 
-        Enter tilts in percentage points. The selected **balancing currency**
-        adjusts automatically so that the total tilt is always zero.
+        Enter a tilt for **each currency** in percentage points.
+        There is no balancing currency: the tilts must sum to **0.0 pp**.
 
-        Example: if USD is +5pp and EUR is the balancing currency,
-        EUR becomes -5pp automatically.
+        Example: USD +5pp and EUR -5pp gives a total tilt of 0pp.
         """
     )
 
-base_tilts = get_preset(preset)
 tilts = {}
 
 with col_controls:
     control_cols = st.columns(3)
 
-    non_balancing = [c for c in CURRENCIES if c != balancing_currency]
-
-    for i, currency in enumerate(non_balancing):
-        default_value = base_tilts.get(currency, 0.0) * 100
-
+    # All government-bond currencies are editable, including EUR.
+    for i, currency in enumerate(CURRENCIES):
         with control_cols[i % 3]:
             tilts[currency] = (
                 st.number_input(
                     f"{currency} tilt (pp)",
                     min_value=-30.0,
                     max_value=30.0,
-                    value=float(default_value),
+                    value=0.0,
                     step=0.5,
-                    key=f"tilt_{currency}_{preset}_{balancing_currency}",
+                    key=f"tilt_{currency}",
                 )
                 / 100.0
             )
-
-# Balance residual automatically.
-tilts[balancing_currency] = -sum(
-    v for c, v in tilts.items()
-    if c != balancing_currency
-)
 
 cofer = data.set_index("Currency")["COFER_Gov_Dist"]
 
@@ -292,24 +264,37 @@ adjusted_gov = pd.Series(
 # VALIDATION
 # ------------------------------------------------------------
 
+tilt_sum = float(sum(tilts.values()))
+invalid_tilt_sum = not np.isclose(tilt_sum, 0.0, atol=1e-9)
 invalid_negative = adjusted_gov.min() < -1e-10
 invalid_sum = not np.isclose(adjusted_gov.sum(), 1.0, atol=1e-9)
 
+if invalid_tilt_sum:
+    st.warning(
+        f"Currency tilts must sum to 0.0 pp. "
+        f"Current sum: {tilt_sum * 100:+.1f} pp."
+    )
+else:
+    st.success("Currency tilts sum to 0.0 pp.")
+
 if invalid_negative:
+    negative_currencies = adjusted_gov[adjusted_gov < -1e-10].index.tolist()
     st.error(
-        "At least one adjusted government-bond weight is negative. "
-        "Reduce the tilt or choose a different balancing currency."
+        "At least one adjusted government-bond weight is negative: "
+        + ", ".join(negative_currencies)
+        + ". Reduce the relevant tilt."
     )
 
 if invalid_sum:
     st.error(
-        "Adjusted government-bond weights do not sum to 100%."
+        f"Adjusted government-bond weights must sum to 100%. "
+        f"Current sum: {adjusted_gov.sum() * 100:.1f}%."
     )
 
-st.info(
-    f"Balancing currency **{balancing_currency}** tilt: "
-    f"**{tilts[balancing_currency] * 100:+.1f} pp**"
-)
+# Do not calculate or display downstream portfolio results until the
+# government-bond currency allocation is valid.
+if invalid_tilt_sum or invalid_negative or invalid_sum:
+    st.stop()
 
 # ------------------------------------------------------------
 # CALCULATE
@@ -479,6 +464,73 @@ st.dataframe(
     detail,
     use_container_width=True,
     hide_index=True,
+)
+
+
+# ------------------------------------------------------------
+# CURRENCY MIX COMPARISON TABLE
+# ------------------------------------------------------------
+
+st.subheader("Currency mix comparison")
+
+# Current benchmark = current total FX benchmark.
+# Recommended Equity + Corporate Bonds = Equity + IG + HY, normalized to 100%.
+# Recommended Government Bonds = adjusted government-bond currency mix, normalized to 100%.
+# Recommended Total = resulting total portfolio FX allocation.
+
+risk_sleeve_total = equity_weight + ig_weight + hy_weight
+
+mix_comparison = result[
+    [
+        "Currency",
+        "Current_FX_Benchmark",
+        "Fixed_Contribution",
+        "Gov_Dist_Adjusted",
+        "Total_FX_Allocation",
+    ]
+].copy()
+
+mix_comparison["Recommended Equity + Corporate Bonds"] = (
+    mix_comparison["Fixed_Contribution"] / risk_sleeve_total
+)
+
+mix_comparison = mix_comparison.rename(
+    columns={
+        "Currency": "Currency",
+        "Current_FX_Benchmark": "Current Currency Benchmark",
+        "Gov_Dist_Adjusted": "Recommended Government Bond Mix",
+        "Total_FX_Allocation": "Recommended Currency Benchmark",
+    }
+)
+
+mix_comparison = mix_comparison[
+    [
+        "Currency",
+        "Current Currency Benchmark",
+        "Recommended Equity + Corporate Bonds",
+        "Recommended Government Bond Mix",
+        "Recommended Currency Benchmark",
+    ]
+]
+
+for col in [
+    "Current Currency Benchmark",
+    "Recommended Equity + Corporate Bonds",
+    "Recommended Government Bond Mix",
+    "Recommended Currency Benchmark",
+]:
+    mix_comparison[col] = mix_comparison[col].map(pct)
+
+st.dataframe(
+    mix_comparison,
+    use_container_width=True,
+    hide_index=True,
+)
+
+st.caption(
+    "The Equity + Corporate Bonds and Government Bonds columns each show "
+    "the currency composition within that sleeve, normalized to 100%. "
+    "The final column shows the resulting total portfolio currency allocation."
 )
 
 # ------------------------------------------------------------
