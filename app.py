@@ -252,6 +252,16 @@ with col_controls:
     control_cols = st.columns(3)
 
     # All government-bond currencies are editable, including EUR.
+    # Default tilts reflect the recommended starting scenario and sum to zero.
+    default_tilts_pp = {
+        "USD": 1.1,
+        "EUR": -1.9,
+        "GBP": -0.8,
+        "JPY": -0.9,
+        "AUD": 1.7,
+        "CAD": 0.8,
+    }
+
     for i, currency in enumerate(CURRENCIES):
         with control_cols[i % 3]:
             tilts[currency] = (
@@ -259,8 +269,8 @@ with col_controls:
                     f"{currency} tilt (pp)",
                     min_value=-30.0,
                     max_value=30.0,
-                    value=0.0,
-                    step=0.5,
+                    value=float(default_tilts_pp.get(currency, 0.0)),
+                    step=0.1,
                     key=f"tilt_{currency}",
                 )
                 / 100.0
