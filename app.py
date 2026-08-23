@@ -19,30 +19,13 @@ st.markdown(
     <style>
     /* Force the Streamlit sidebar controls to LTR. */
     section[data-testid="stSidebar"],
-    section[data-testid="stSidebar"] > div,
-    section[data-testid="stSidebar"] [data-testid="stSlider"],
-    section[data-testid="stSidebar"] [data-testid="stSlider"] *,
-    section[data-testid="stSidebar"] [data-baseweb="slider"],
-    section[data-testid="stSidebar"] [data-baseweb="slider"] * {
+    section[data-testid="stSidebar"] > div {
         direction: ltr !important;
         unicode-bidi: isolate !important;
     }
 
-    section[data-testid="stSidebar"] [data-testid="stSlider"] {
+    section[data-testid="stSidebar"] {
         text-align: left !important;
-    }
-
-    section[data-testid="stSidebar"] [data-baseweb="slider"],
-    section[data-testid="stSidebar"] [data-baseweb="slider"] > div {
-        flex-direction: row !important;
-        transform: none !important;
-    }
-
-    section[data-testid="stSidebar"] [role="slider"],
-    section[data-testid="stSidebar"] [role="slider"] * {
-        direction: ltr !important;
-        unicode-bidi: isolate !important;
-        transform: none !important;
     }
     </style>
     """,
@@ -66,9 +49,6 @@ data = load_inputs()
 # CURRENCY ORDER
 # ------------------------------------------------------------
 
-# Required order throughout the application:
-# USD, EUR, JPY, GBP, AUD, CAD
-
 CURRENCY_ORDER = [
     "USD",
     "EUR",
@@ -78,7 +58,7 @@ CURRENCY_ORDER = [
     "CAD",
 ]
 
-# Validate that the required currencies exist.
+
 missing_currencies = [
     c for c in CURRENCY_ORDER
     if c not in data["Currency"].values
@@ -91,10 +71,11 @@ if missing_currencies:
     )
     st.stop()
 
-# Keep only currencies used by the tool and force the desired order.
+
 data = data[
     data["Currency"].isin(CURRENCY_ORDER)
 ].copy()
+
 
 data["Currency"] = pd.Categorical(
     data["Currency"],
@@ -102,11 +83,13 @@ data["Currency"] = pd.Categorical(
     ordered=True,
 )
 
+
 data = (
     data
     .sort_values("Currency")
     .reset_index(drop=True)
 )
+
 
 CURRENCIES = CURRENCY_ORDER.copy()
 
@@ -183,50 +166,56 @@ def calculate_portfolio(
 st.title("FX Allocation Tool")
 
 st.caption(
-    "Change the equity weight and government-bond currency mix, "
+    "Select the government-bond currency allocation directly "
     "and see the resulting total portfolio FX allocation."
 )
 
 
 # ------------------------------------------------------------
-# GOVERNMENT-BOND TILTS — TOP OF PAGE
+# COFER
+# ------------------------------------------------------------
+
+cofer = (
+    data
+    .set_index("Currency")[
+        "COFER_Gov_Dist"
+    ]
+    .astype(float)
+)
+
+
+# ------------------------------------------------------------
+# GOVERNMENT-BOND CURRENCY ALLOCATION
 # ------------------------------------------------------------
 
 st.subheader("Government-bond currency allocation")
 
 st.markdown(
     """
-    **Base allocation:** COFER government-bond distribution.
+    **Starting allocation: COFER**
 
-    Enter a tilt for **each currency** in percentage points.
-    There is no balancing currency: the tilts must sum to **0.0 pp**.
+    Enter the desired currency allocation **within the government-bond sleeve**.
 
-    Example: USD +5pp and EUR -5pp gives a total tilt of 0pp.
+    The starting values are the COFER weights.
+    The selected weights must sum to **100%**.
+
+    The implied tilt versus COFER is calculated automatically.
     """
 )
 
 
-# Default recommended starting scenario.
-# Sum = 0.0 pp.
-default_tilts_pp = {
-    "USD": 1.1,
-    "EUR": -1.9,
-    "JPY": -0.9,
-    "GBP": -0.8,
-    "AUD": 1.7,
-    "CAD": 0.8,
-}
-
-
-tilts = {}
-
-
 # ------------------------------------------------------------
-# TILT CONTROLS
+# INPUT CONTROLS
 #
 # Row 1: USD | EUR | JPY
 # Row 2: GBP | AUD | CAD
+#
+# User enters the ACTUAL government-bond allocation.
+# Default = COFER rounded to one decimal place.
 # ------------------------------------------------------------
+
+selected_gov_pct = {}
+
 
 row1_cols = st.columns(3)
 
@@ -235,18 +224,22 @@ for col, currency in zip(
     ["USD", "EUR", "JPY"],
 ):
     with col:
-        tilts[currency] = (
-            st.number_input(
-                f"{currency} tilt (pp)",
-                min_value=-30.0,
-                max_value=30.0,
-                value=float(
-                    default_tilts_pp[currency]
-                ),
-                step=0.1,
-                key=f"tilt_{currency}",
-            )
-            / 100.0
+
+        st.caption(
+            f"COFER: {cofer.loc[currency] * 100:.2f}%"
+        )
+
+        selected_gov_pct[currency] = st.number_input(
+            f"{currency} Government Bond Weight (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=round(
+                float(cofer.loc[currency] * 100),
+                1,
+            ),
+            step=0.1,
+            format="%.1f",
+            key=f"gov_weight_{currency}",
         )
 
 
@@ -257,110 +250,174 @@ for col, currency in zip(
     ["GBP", "AUD", "CAD"],
 ):
     with col:
-        tilts[currency] = (
-            st.number_input(
-                f"{currency} tilt (pp)",
-                min_value=-30.0,
-                max_value=30.0,
-                value=float(
-                    default_tilts_pp[currency]
-                ),
-                step=0.1,
-                key=f"tilt_{currency}",
-            )
-            / 100.0
+
+        st.caption(
+            f"COFER: {cofer.loc[currency] * 100:.2f}%"
+        )
+
+        selected_gov_pct[currency] = st.number_input(
+            f"{currency} Government Bond Weight (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=round(
+                float(cofer.loc[currency] * 100),
+                1,
+            ),
+            step=0.1,
+            format="%.1f",
+            key=f"gov_weight_{currency}",
         )
 
 
-# ------------------------------------------------------------
-# ADJUSTED GOVERNMENT-BOND MIX
-# ------------------------------------------------------------
-
-cofer = (
-    data
-    .set_index("Currency")[
-        "COFER_Gov_Dist"
-    ]
-)
-
-adjusted_gov = pd.Series(
+# Convert percentage inputs to decimals.
+selected_gov = pd.Series(
     {
-        c: (
-            cofer.loc[c]
-            + tilts[c]
-        )
-        for c in CURRENCIES
+        currency:
+            selected_gov_pct[currency] / 100.0
+
+        for currency in CURRENCIES
     }
 )
 
 
 # ------------------------------------------------------------
-# VALIDATION
+# CALCULATE IMPLIED TILTS
 # ------------------------------------------------------------
 
-tilt_sum = float(
-    sum(tilts.values())
+tilts = (
+    selected_gov
+    - cofer.reindex(CURRENCIES)
 )
 
-invalid_tilt_sum = not np.isclose(
-    tilt_sum,
-    0.0,
-    atol=1e-9,
+
+# ------------------------------------------------------------
+# VALIDATE GOVERNMENT-BOND MIX
+# ------------------------------------------------------------
+
+gov_mix_sum = float(
+    selected_gov.sum()
 )
 
-invalid_negative = (
-    adjusted_gov.min()
-    < -1e-10
+
+gov_mix_sum_pct = (
+    gov_mix_sum * 100.0
 )
 
-invalid_sum = not np.isclose(
-    adjusted_gov.sum(),
+
+gov_mix_difference_pp = (
+    gov_mix_sum_pct - 100.0
+)
+
+
+# Because inputs have one decimal place,
+# allow only tiny numerical floating-point error.
+valid_gov_sum = np.isclose(
+    gov_mix_sum,
     1.0,
     atol=1e-9,
 )
 
 
-if invalid_tilt_sum:
-    st.warning(
-        f"Currency tilts must sum to 0.0 pp. "
-        f"Current sum: {tilt_sum * 100:+.1f} pp."
+# ------------------------------------------------------------
+# SHOW CURRENT TOTAL
+# ------------------------------------------------------------
+
+summary_col1, summary_col2 = st.columns(2)
+
+
+with summary_col1:
+
+    st.metric(
+        "Selected Gov. Allocation",
+        f"{gov_mix_sum_pct:.1f}%",
     )
-else:
+
+
+with summary_col2:
+
+    st.metric(
+        "Difference from 100%",
+        f"{gov_mix_difference_pp:+.1f} pp",
+    )
+
+
+if valid_gov_sum:
+
     st.success(
-        "Currency tilts sum to 0.0 pp."
+        "Government-bond currency allocation sums to 100.0%."
+    )
+
+else:
+
+    st.warning(
+        "Government-bond currency allocation must sum to 100.0%. "
+        f"Current total: {gov_mix_sum_pct:.1f}% "
+        f"({gov_mix_difference_pp:+.1f} pp)."
     )
 
 
-if invalid_negative:
-    negative_currencies = (
-        adjusted_gov[
-            adjusted_gov < -1e-10
-        ]
-        .index
-        .tolist()
+# ------------------------------------------------------------
+# COFER VS SELECTED TABLE
+# ------------------------------------------------------------
+
+gov_input_table = pd.DataFrame(
+    {
+        "Currency": CURRENCIES,
+
+        "COFER (%)": [
+            cofer.loc[c] * 100
+            for c in CURRENCIES
+        ],
+
+        "Selected (%)": [
+            selected_gov.loc[c] * 100
+            for c in CURRENCIES
+        ],
+
+        "Tilt vs COFER (pp)": [
+            tilts.loc[c] * 100
+            for c in CURRENCIES
+        ],
+    }
+)
+
+
+gov_input_table["COFER (%)"] = (
+    gov_input_table["COFER (%)"]
+    .map(lambda x: f"{x:.2f}%")
+)
+
+
+gov_input_table["Selected (%)"] = (
+    gov_input_table["Selected (%)"]
+    .map(lambda x: f"{x:.1f}%")
+)
+
+
+gov_input_table["Tilt vs COFER (pp)"] = (
+    gov_input_table["Tilt vs COFER (pp)"]
+    .map(lambda x: f"{x:+.2f} pp")
+)
+
+
+st.dataframe(
+    gov_input_table,
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+# Stop calculation if government-bond allocation != 100%.
+if not valid_gov_sum:
+    st.info(
+        "Adjust the government-bond currency weights above "
+        "until the total equals 100.0%."
     )
-
-    st.error(
-        "At least one adjusted government-bond weight is negative: "
-        + ", ".join(negative_currencies)
-        + ". Reduce the relevant tilt."
-    )
-
-
-if invalid_sum:
-    st.error(
-        f"Adjusted government-bond weights must sum to 100%. "
-        f"Current sum: "
-        f"{adjusted_gov.sum() * 100:.1f}%."
-    )
-
-
-if (
-    invalid_tilt_sum
-    or invalid_negative
-    or invalid_sum
-):
     st.stop()
+
+
+# This replaces the old adjusted_gov based on entered tilts.
+adjusted_gov = selected_gov.copy()
 
 
 st.divider()
@@ -374,6 +431,7 @@ st.sidebar.header(
     "Portfolio assumptions"
 )
 
+
 equity_pct = st.sidebar.number_input(
     "Equity weight (%)",
     min_value=25,
@@ -382,6 +440,7 @@ equity_pct = st.sidebar.number_input(
     step=1,
 )
 
+
 ig_pct = st.sidebar.number_input(
     "IG weight (%)",
     min_value=9,
@@ -389,6 +448,7 @@ ig_pct = st.sidebar.number_input(
     value=9,
     step=1,
 )
+
 
 hy_pct = st.sidebar.number_input(
     "HY weight (%)",
@@ -421,6 +481,13 @@ gov_weight = (
 )
 
 
+if gov_weight < 0:
+    st.sidebar.error(
+        "Equity + IG + HY exceed 100%."
+    )
+    st.stop()
+
+
 st.sidebar.metric(
     "Equity",
     pct(equity_weight)
@@ -441,10 +508,12 @@ st.sidebar.metric(
     pct(gov_weight)
 )
 
+
 st.sidebar.divider()
 
+
 st.sidebar.caption(
-    "Government-bond base allocation: COFER"
+    "Government-bond reference allocation: COFER"
 )
 
 
@@ -455,6 +524,7 @@ st.sidebar.caption(
 st.subheader(
     "Portfolio structure"
 )
+
 
 c1, c2, c3, c4, c5 = st.columns(
     [
@@ -534,6 +604,7 @@ with st.expander(
         ]
     ].copy()
 
+
     assumptions.columns = [
         "Currency",
         "Equity",
@@ -542,16 +613,19 @@ with st.expander(
         "COFER Gov.",
     ]
 
+
     for col in [
         "Equity",
         "IG",
         "HY",
         "COFER Gov.",
     ]:
+
         assumptions[col] = (
             assumptions[col]
             .map(pct)
         )
+
 
     st.dataframe(
         assumptions,
@@ -559,14 +633,12 @@ with st.expander(
         hide_index=True,
     )
 
+
     st.caption(
         "The currency distributions within Equity, IG and HY are fixed assumptions. "
-        "Total Equity can vary from 25% to 30%, IG from 9% to 15%, "
-        "and HY from 1% to 5%. "
-        "Government Bonds are always the residual required to bring "
-        "the total portfolio to 100%. "
-        "The Government Bond currency distribution starts from COFER "
-        "and can be changed using the tilts above."
+        "Government Bonds are always the residual asset class. "
+        "The Government Bond currency distribution is entered directly above, "
+        "with COFER shown as the reference allocation."
     )
 
 
@@ -600,6 +672,7 @@ if not np.isclose(
 BASE_EQUITY_WEIGHT = 0.25
 BASE_IG_WEIGHT = 0.09
 BASE_HY_WEIGHT = 0.01
+
 
 BASE_GOV_WEIGHT = (
     1.0
@@ -681,10 +754,10 @@ gov_display = gov_table[
             "COFER Gov.",
 
         "Gov_Dist_Adjusted":
-            "Adjusted Gov.",
+            "Selected Gov.",
 
         "Tilt_pp":
-            "Tilt (pp)",
+            "Tilt vs COFER (pp)",
 
         "Gov_Portfolio_Contribution":
             "Contribution to Portfolio",
@@ -695,9 +768,10 @@ gov_display = gov_table[
 for col in [
     "Current Gov. Mix (implied)",
     "COFER Gov.",
-    "Adjusted Gov.",
+    "Selected Gov.",
     "Contribution to Portfolio",
 ]:
+
     gov_display[col] = (
         gov_display[col]
         .map(pct)
@@ -705,10 +779,10 @@ for col in [
 
 
 gov_display[
-    "Tilt (pp)"
+    "Tilt vs COFER (pp)"
 ] = (
     gov_display[
-        "Tilt (pp)"
+        "Tilt vs COFER (pp)"
     ]
     .map(
         lambda x:
@@ -721,6 +795,7 @@ st.subheader(
     "Government-bond currency mix"
 )
 
+
 st.dataframe(
     gov_display,
     use_container_width=True,
@@ -729,9 +804,8 @@ st.dataframe(
 
 
 st.caption(
-    "Current Gov. Mix (implied) is derived from the current currency benchmark "
-    "after subtracting the fixed currency contribution of 25% Equity, 9% IG and "
-    "1% HY, and normalizing the remaining 65% Government Bonds sleeve to 100%."
+    "Selected Gov. is the currency allocation entered above. "
+    "Tilt vs COFER is calculated automatically as Selected Gov. minus COFER."
 )
 
 
@@ -772,6 +846,7 @@ for col in [
     "Government Bonds",
     "New Portfolio",
 ]:
+
     detail[col] = (
         detail[col]
         .map(pct)
@@ -837,7 +912,7 @@ mix_comparison = (
                 "Current Currency Benchmark",
 
             "Gov_Dist_Adjusted":
-                "Recommended Government Bond Mix",
+                "Selected Government Bond Mix",
 
             "Total_FX_Allocation":
                 "Recommended Currency Benchmark",
@@ -851,7 +926,7 @@ mix_comparison = mix_comparison[
         "Currency",
         "Current Currency Benchmark",
         "Recommended Equity + Corporate Bonds",
-        "Recommended Government Bond Mix",
+        "Selected Government Bond Mix",
         "Recommended Currency Benchmark",
     ]
 ]
@@ -860,9 +935,10 @@ mix_comparison = mix_comparison[
 for col in [
     "Current Currency Benchmark",
     "Recommended Equity + Corporate Bonds",
-    "Recommended Government Bond Mix",
+    "Selected Government Bond Mix",
     "Recommended Currency Benchmark",
 ]:
+
     mix_comparison[col] = (
         mix_comparison[col]
         .map(pct)
@@ -986,9 +1062,9 @@ cofer_stage = (
 
 
 # Stage 2:
-# Apply selected tilts.
+# Apply selected government-bond distribution.
 
-tilt_stage = (
+selected_gov_stage = (
     base_fixed_contribution
     + BASE_GOV_WEIGHT
     * result["Gov_Dist_Adjusted"]
@@ -1017,16 +1093,16 @@ decomp = pd.DataFrame(
                 - current_total
             ) * 100.0,
 
-        "Tilt effect":
+        "Gov. allocation effect":
             (
-                tilt_stage
+                selected_gov_stage
                 - cofer_stage
             ) * 100.0,
 
         "Asset-mix effect":
             (
                 final_stage
-                - tilt_stage
+                - selected_gov_stage
             ) * 100.0,
 
         "Total change":
@@ -1042,7 +1118,7 @@ decomp[
     "Reconstructed change"
 ] = (
     decomp["COFER effect"]
-    + decomp["Tilt effect"]
+    + decomp["Gov. allocation effect"]
     + decomp["Asset-mix effect"]
 )
 
@@ -1052,6 +1128,7 @@ if not np.allclose(
     decomp["Total change"],
     atol=1e-9,
 ):
+
     st.error(
         "Internal decomposition mismatch."
     )
@@ -1062,7 +1139,7 @@ decomp_fig = go.Figure()
 
 for component in [
     "COFER effect",
-    "Tilt effect",
+    "Gov. allocation effect",
     "Asset-mix effect",
 ]:
 
@@ -1145,12 +1222,12 @@ st.plotly_chart(
 
 
 st.caption(
-    "COFER effect: move from the current implied government-bond mix to COFER "
-    "using the fixed 25% Equity / 9% IG / 1% HY benchmark mix. "
-    "Tilt effect: additional impact of the selected government-bond currency tilts. "
+    "COFER effect: move from the current implied government-bond mix "
+    "to COFER using the fixed 25% Equity / 9% IG / 1% HY benchmark mix. "
+    "Gov. allocation effect: additional impact of moving from COFER "
+    "to the selected government-bond currency allocation. "
     "Asset-mix effect: additional impact of changing Equity / IG / HY weights "
-    "from 25% / 9% / 1%. "
-    "At the default 25% / 9% / 1%, the Asset-mix effect is zero."
+    "from 25% / 9% / 1%."
 )
 
 
@@ -1162,7 +1239,7 @@ decomp_display = decomp[
     [
         "Currency",
         "COFER effect",
-        "Tilt effect",
+        "Gov. allocation effect",
         "Asset-mix effect",
         "Total change",
     ]
@@ -1171,7 +1248,7 @@ decomp_display = decomp[
 
 for col in [
     "COFER effect",
-    "Tilt effect",
+    "Gov. allocation effect",
     "Asset-mix effect",
     "Total change",
 ]:
